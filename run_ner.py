@@ -95,9 +95,9 @@ class DataProcessor(object):
         raise NotImplementedError()
 
     @classmethod
-    def _read_tsv(cls, input_file, quotechar=None):
+    def _read_data(data_dir, data_set):
         """Reads a tab separated value file."""
-        return readfile(input_file)
+        return readfile(data_dir, data_set)
 
 
 class NerProcessor(DataProcessor):
@@ -106,17 +106,17 @@ class NerProcessor(DataProcessor):
     def get_train_examples(self, data_dir):
         """See base class."""
         return self._create_examples(
-            self.readfile(data_dir,"train"), "train")
+            self._read_data(data_dir,"train"), "train")
 
     def get_dev_examples(self, data_dir):
         """See base class."""
         return self._create_examples(
-            self.readfile(data_dir, "dev"), "dev")
+            self._read_data(data_dir, "dev"), "dev")
 
     def get_test_examples(self, data_dir):
         """See base class."""
         return self._create_examples(
-            self.readfile(data_dir, "test"), "test")
+            self._read_data(data_dir, "test"), "test")
 
     def get_labels(self):
         return ["0", "1", "2", "3","X", "[pad]"]
