@@ -95,7 +95,7 @@ class DataProcessor(object):
         raise NotImplementedError()
 
     @classmethod
-    def _read_data(data_dir, data_set):
+    def _read_data(self, data_dir, data_set):
         """Reads a tab separated value file."""
         return readfile(data_dir, data_set)
 
