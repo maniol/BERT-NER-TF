@@ -174,7 +174,7 @@ def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer
                     label_ids.append(label_map['X'])
 
                 if len(tokens) == max_seq_length - 1:
-                    assert len(tokens) == len(label_ids), "#words: %d; #punctuations: %d" % (len(tokens, len(label_ids))
+                    assert len(tokens) == len(label_ids), "#words: %d; #punctuations: %d" % (len(tokens, len(label_ids)))
 
                     if last_eos_idx == 0:
                         skip_until_eos = True
