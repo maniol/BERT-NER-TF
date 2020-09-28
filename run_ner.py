@@ -168,7 +168,7 @@ def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer
                 tokens.append(bert_token)
                 segment_ids.append(0)
 
-                if m == len(bert_tokens)-1
+                if m == len(bert_tokens)-1:
                     label_ids.append(label_map[labels[i]])
                 else:
                     label_ids.append(label_map['X'])
