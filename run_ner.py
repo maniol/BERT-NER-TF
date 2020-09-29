@@ -318,7 +318,7 @@ def main():
     
     if args.do_train:
         tokenizer = FullTokenizer(os.path.join(args.bert_model, "vocab.txt"), args.do_lower_case)
-    
+    '''
     if args.multi_gpu:
         if len(args.gpus.split(',')) == 1:
             strategy = tf.distribute.MirroredStrategy()
@@ -328,7 +328,7 @@ def main():
     else:
         gpu = args.gpus.split(',')[0]
         strategy = tf.distribute.OneDeviceStrategy(device=f"/gpu:{gpu}")
-
+    '''
     train_examples = None
     optimizer = None
     num_train_optimization_steps = 0
