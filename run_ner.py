@@ -353,9 +353,9 @@ def main():
             epsilon=args.adam_epsilon,
             exclude_from_weight_decay=['layer_norm', 'bias'])
 
-        with strategy.scope():
-            ner = BertNer(args.bert_model, tf.float32, num_labels, args.max_seq_length)
-            loss_fct = tf.keras.losses.SparseCategoricalCrossentropy(reduction=tf.keras.losses.Reduction.NONE)
+        #with strategy.scope():
+        ner = BertNer(args.bert_model, tf.float32, num_labels, args.max_seq_length)
+        loss_fct = tf.keras.losses.SparseCategoricalCrossentropy(reduction=tf.keras.losses.Reduction.NONE)
 
     label_map = {i: label for i, label in enumerate(label_list, 1)}
     if args.do_train:
