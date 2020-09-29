@@ -318,7 +318,6 @@ def main():
     
     if args.do_train:
         tokenizer = FullTokenizer(os.path.join(args.bert_model, "vocab.txt"), args.do_lower_case)
-    '''
     if args.multi_gpu:
         if len(args.gpus.split(',')) == 1:
             strategy = tf.distribute.MirroredStrategy()
@@ -328,7 +327,6 @@ def main():
     else:
         gpu = args.gpus.split(',')[0]
         strategy = tf.distribute.OneDeviceStrategy(device=f"/gpu:{gpu}")
-    '''
     train_examples = None
     optimizer = None
     num_train_optimization_steps = 0
@@ -353,9 +351,9 @@ def main():
             epsilon=args.adam_epsilon,
             exclude_from_weight_decay=['layer_norm', 'bias'])
 
-        #with strategy.scope():
-        ner = BertNer(args.bert_model, tf.float32, num_labels, args.max_seq_length)
-        loss_fct = tf.keras.losses.SparseCategoricalCrossentropy(reduction=tf.keras.losses.Reduction.NONE)
+        with strategy.scope():
+            ner = BertNer(args.bert_model, tf.float32, num_labels, args.max_seq_length)
+            loss_fct = tf.keras.losses.SparseCategoricalCrossentropy(reduction=tf.keras.losses.Reduction.NONE)
 
     label_map = {i: label for i, label in enumerate(label_list, 1)}
     if args.do_train:
