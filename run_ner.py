@@ -52,11 +52,11 @@ class InputExample(object):
 class InputFeatures(object):
     """A single set of features of data."""
 
-    def __init__(self, input_ids, input_mask, segment_ids, label_id, valid_ids=None, label_mask=None):
+    def __init__(self, input_ids, input_mask, segment_ids, label_ids, valid_ids=None, label_mask=None):
         self.input_ids = input_ids
         self.input_mask = input_mask
         self.segment_ids = segment_ids
-        self.label_id = label_id
+        self.label_ids = label_ids
         self.valid_ids = valid_ids
         self.label_mask = label_mask
 
@@ -80,6 +80,7 @@ def readfile(data_dir, dataset):
     return data
 
 
+
 class DataProcessor(object):
     """Base class for data converters for sequence classification data sets."""
 
@@ -96,9 +97,9 @@ class DataProcessor(object):
         raise NotImplementedError()
 
     @classmethod
-    def _read_data(self, data_dir, data_set):
+    def _read_tsv(self, data_dir, dataset_type):
         """Reads a tab separated value file."""
-        return readfile(data_dir, data_set)
+        return readfile(data_dir, dataset_type)
 
 
 class NerProcessor(DataProcessor):
@@ -107,124 +108,197 @@ class NerProcessor(DataProcessor):
     def get_train_examples(self, data_dir):
         """See base class."""
         return self._create_examples(
-            self._read_data(data_dir,"train"), "train")
+            self._read_tsv(data_dir, "train"), "train")
 
     def get_dev_examples(self, data_dir):
         """See base class."""
         return self._create_examples(
-            self._read_data(data_dir, "dev"), "dev")
+            self._read_tsv(data_dir, "valid"), "dev")
 
     def get_test_examples(self, data_dir):
         """See base class."""
         return self._create_examples(
-            self._read_data(data_dir, "test"), "test")
+            self._read_tsv(data_dir, "test"), "test")
 
     def get_labels(self):
         return ["0", "1", "2", "3","X", "[pad]"]
 
     def _create_examples(self, data, set_type):
         examples = []
-        for i, (sentence, label) in enumerate(zip(data['sentence'], data['label'])):
+        for i, (sent, lab) in enumerate(zip(data['sentence'],data['label'])):
             guid = "%s-%s" % (set_type, i)
-            text_a = tokenization.convert_to_unicode(sentence)
+            text_a = tokenization.convert_to_unicode(sent)
             text_b = None
-            label = tokenization.convert_to_unicode(label)
+            label = tokenization.convert_to_unicode(lab)
             examples.append(InputExample(
                 guid=guid, text_a=text_a, text_b=text_b, label=label))
         return examples
 
+#Symbols that denote end of a sentence
+#Remove 3 if using Chinese text 
+EOS = ['1','3']
 
 def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer):
-    """Loads a data file into a list of `InputBatch`s."""
+    
+    """
+        Converts examples to tensorflow examples and 
+        write them using TFRecordWriter to output_file
+        
+        Basic difference with BERT is that one single 
+        Input example can be converted to multiple 
+        tf_examples.
+        Args:
+            examples: A list of Input Example objects
+            label_list:  The list of all the possible labels
+            max_seq_length: Length of each feature for BERT model
+            tokenizer: BERT tokenizer
+            output_file: File for writing the tf_examples
+        
+        Returns:
+            idx: The count of the tf_examples written
+              
+    """
 
-    label_map = {label: i for i, label in enumerate(label_list)}
+    #label_map is a dictionary for converting labels to ids
+    label_map = {}
+    for (i, label) in enumerate(label_list):
+        label_map[label] = i
+
 
     features = []
+    
+    #variable to count the number of input examples
+    idx = 0
     for (ex_index, example) in enumerate(examples):
         if ex_index % 10000 == 0:
-            tf.logging.info("Converting example %d of %d" % (ex_index, len(examples)))
+            logger.info("Converting example %d of %d" % (ex_index, len(examples)))
+
+        
         textlist = example.text_a.split(' ')
         labels = example.label.split(' ')
-        
+
         label_ids = []
         tokens = []
         segment_ids = []
-        
+        valid = []
+        label_mask = []
+        #Add CLS token  
         tokens.append("[CLS]")
         segment_ids.append(0)
-        labels_ids.append(label_map["[pad]"])
+        valid.append(0)
+        label_mask.append(0)
+        label_ids.append(label_map["[pad]"])
 
+        #used for skipping sentences with more than 128 tokens
         skip_until_eos = False
         last_eos_idx = 0
 
         for i, word in enumerate(textlist):
             bert_tokens = tokenizer.tokenize(word)
-            for m, bert_token in enumerate(bert_tokens):
+            for j, bert_token in enumerate(bert_tokens):
+                
+                #Skip words till the labels are not in EOS
                 if skip_until_eos:
                     if labels[i] in EOS:
                         skip_until_eos = False
+
                     continue
+
                 if labels[i] in EOS:
                     last_eos_idx = len(tokens)
+
                 tokens.append(bert_token)
                 segment_ids.append(0)
-
-                if m == len(bert_tokens)-1:
+                
+                if j == len(bert_tokens)-1:
+                    #label the last token as the true label
                     label_ids.append(label_map[labels[i]])
+                    valid.append(1)
+                    label_mask.append(True)  
                 else:
-                    label_ids.append(label_map['X'])
+                    #label rest of the tokens as X
+                    label_ids.append(label_map["X"])
+                    valid.append(0)
+                    label_mask.append(0)
 
-                if len(tokens) == max_seq_length - 1:
-                    assert len(tokens) == len(label_ids), "#words: %d; #punctuations: %d" % (len(tokens, len(label_ids)))
+                if len(tokens) == max_seq_length-1:
+                    assert len(tokens) ==  len(label_ids) ,"#words: %d; #punctuations: %d" \
+                    % (len(tokens), len(label_ids))
 
+                    #if example has a sentence that is more than 128 tokens, skip it    
                     if last_eos_idx == 0:
                         skip_until_eos = True
+
                         label_ids = []
                         tokens = []
                         segment_ids = []
+                        valid = []
+                        label_mask = []
                         tokens.append("[CLS]")
                         segment_ids.append(0)
                         label_ids.append(label_map["[pad]"])
+                        valid.append(0)
+                        label_mask.append(0)
+                    
+                    #Else add the sequence of 128 tokens with labels to the output file
                     else:
                         tokens.append("[SEP]")
                         segment_ids.append(0)
                         label_ids.append(label_map["[pad]"])
-                        
+                        valid.append(0)
+                        label_mask.append(0)
+                    
                         input_ids = tokenizer.convert_tokens_to_ids(tokens)
                         input_mask = [1] * len(input_ids)
 
-                        
                         assert len(input_ids) == max_seq_length
                         assert len(input_mask) == max_seq_length
                         assert len(segment_ids) == max_seq_length
                         assert len(label_ids) == max_seq_length
+                        assert len(valid) == max_seq_length
+                        assert len(label_mask) == max_seq_length
 
                         if idx < 10:
-                            tf.logging.info("*** Example ***")
-                            tf.logging.info("guid: %s" % (example.guid))
-                            tf.logging.info("tokens: %s" % " ".join(
+                            logger.info("*** Example ***")
+                            logger.info("guid: %s" % (example.guid))
+                            logger.info("tokens: %s" % " ".join(
                                 [tokenization.printable_text(x) for x in tokens]))
-                            tf.logging.info("input_ids: %s" % " ".join([str(x) for x in input_ids]))
-                            tf.logging.info("input_mask: %s" % " ".join([str(x) for x in input_mask]))
-                            tf.logging.info("segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
-                            tf.logging.info("label_ids: %s" % " ".join([str(x) for x in label_ids]))
+                            logger.info("input_ids: %s" % " ".join([str(x) for x in input_ids]))
+                            logger.info("input_mask: %s" % " ".join([str(x) for x in input_mask]))
+                            logger.info("segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
+                            logger.info("label_ids: %s" % " ".join([str(x) for x in label_ids]))
 
 
                         features.append(InputFeatures(
                             input_ids=input_ids,
                             input_mask=input_mask,
                             segment_ids=segment_ids,
-                            label_ids=label_ids
+                            label_ids=label_ids,
+                            valid_ids=valid,
+                            label_mask=label_mask
                         ))
+                        
+                        
                         idx += 1
+
+                        #Continue to process the rest of the example
+                        rest = len(segment_ids[last_eos_idx+1:-1])
                         tokens = ["[CLS]"] + tokens[last_eos_idx+1:-1]
                         segment_ids = [0] + segment_ids[last_eos_idx+1:-1]
                         label_ids = [label_map["[pad]"]] + label_ids[last_eos_idx+1:-1]
-                    last_eos_idx = 0
+                        valid = [0] + valid[last_eos_idx+1:-1]
+                        label_mask = [0] + label_mask[last_eos_idx+1:-1]
+
+                    last_eos_idx = 0 
+        
+        #if the tokens are less than 128 for tf_example. Pad it with pad tokens.
         if len(tokens) > 2:
+
             tokens.append("[SEP]")
             segment_ids.append(0)
             label_ids.append(label_map["[pad]"])
+            valid.append(0)
+            label_mask.append(0)
             
             input_ids = tokenizer.convert_tokens_to_ids(tokens)
             input_mask = [1] * len(input_ids)
@@ -234,39 +308,133 @@ def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer
                 input_mask.append(0)
                 segment_ids.append(0)
                 label_ids.append(label_map["[pad]"])
+                valid.append(0)
+                label_mask.append(0)
                 
             assert len(input_ids) == max_seq_length
             assert len(input_mask) == max_seq_length
             assert len(segment_ids) == max_seq_length
             assert len(label_ids) == max_seq_length
-
+            assert len(valid) == max_seq_length
+            assert len(label_mask) == max_seq_length
+                
             if idx < 10:
-                tf.logging.info("*** Example ***")
-                tf.logging.info("guid: %s" % (example.guid))
-                tf.logging.info("tokens: %s" % " ".join(
+                logger.info("*** Example ***")
+                logger.info("guid: %s" % (example.guid))
+                logger.info("tokens: %s" % " ".join(
                     [tokenization.printable_text(x) for x in tokens]))
-                tf.logging.info("input_ids: %s" % " ".join([str(x) for x in input_ids]))
-                tf.logging.info("input_mask: %s" % " ".join([str(x) for x in input_mask]))
-                tf.logging.info("segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
-                tf.logging.info("label_ids: %s" % " ".join([str(x) for x in label_ids]))
+                logger.info("input_ids: %s" % " ".join([str(x) for x in input_ids]))
+                logger.info("input_mask: %s" % " ".join([str(x) for x in input_mask]))
+                logger.info("segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
+                logger.info("label_ids: %s" % " ".join([str(x) for x in label_ids]))
             
             features.append(InputFeatures(
                 input_ids=input_ids,
                 input_mask=input_mask,
                 segment_ids=segment_ids,
-                label_ids=label_ids
+                label_ids=label_ids,
+                valid_ids=valid,
+                label_mask=label_mask
             ))
             idx += 1
-                        
+    return features
+'''
+ORIGINAL
+def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer):
+    """Loads a data file into a list of `InputBatch`s."""
+
+    label_map = {label: i for i, label in enumerate(label_list, 1)}
+
+    features = []
+    for (ex_index, example) in enumerate(examples):
+        textlist = example.text_a.split(' ')
+        labellist = example.label
+        tokens = []
+        labels = []
+        valid = []
+        label_mask = []
+        for i, word in enumerate(textlist):
+            token = tokenizer.tokenize(word)
+            tokens.extend(token)
+            label_1 = labellist[i]
+            for m in range(len(token)):
+                if m == 0:
+                    labels.append(label_1)
+                    valid.append(1)
+                    label_mask.append(True)
+                else:
+                    valid.append(0)
+        if len(tokens) >= max_seq_length - 1:
+            tokens = tokens[0:(max_seq_length - 2)]
+            labels = labels[0:(max_seq_length - 2)]
+            valid = valid[0:(max_seq_length - 2)]
+            label_mask = label_mask[0:(max_seq_length - 2)]
+        ntokens = []
+        segment_ids = []
+        label_ids = []
+        ntokens.append("[CLS]")
+        segment_ids.append(0)
+        valid.insert(0, 1)
+        label_mask.insert(0, True)
+        label_ids.append(label_map["[CLS]"])
+        for i, token in enumerate(tokens):
+            ntokens.append(token)
+            segment_ids.append(0)
+            if len(labels) > i:
+                label_ids.append(label_map[labels[i]])
+        ntokens.append("[SEP]")
+        segment_ids.append(0)
+        valid.append(1)
+        label_mask.append(True)
+        label_ids.append(label_map["[SEP]"])
+        input_ids = tokenizer.convert_tokens_to_ids(ntokens)
+        input_mask = [1] * len(input_ids)
+        label_mask = [True] * len(label_ids)
+        while len(input_ids) < max_seq_length:
+            input_ids.append(0)
+            input_mask.append(0)
+            segment_ids.append(0)
+            label_ids.append(0)
+            valid.append(1)
+            label_mask.append(False)
+        while len(label_ids) < max_seq_length:
+            label_ids.append(0)
+            label_mask.append(False)
+        assert len(input_ids) == max_seq_length
+        assert len(input_mask) == max_seq_length
+        assert len(segment_ids) == max_seq_length
+        assert len(label_ids) == max_seq_length
+        assert len(valid) == max_seq_length
+        assert len(label_mask) == max_seq_length
+
+        if ex_index < 5:
+            logger.info("*** Example ***")
+            logger.info("guid: %s" % (example.guid))
+            logger.info("tokens: %s" % " ".join(
+                [str(x) for x in tokens]))
+            logger.info("input_ids: %s" %
+                        " ".join([str(x) for x in input_ids]))
+            logger.info("input_mask: %s" %
+                        " ".join([str(x) for x in input_mask]))
+            logger.info(
+                "segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
+
+        features.append(
+            InputFeatures(input_ids=input_ids,
+                          input_mask=input_mask,
+                          segment_ids=segment_ids,
+                          label_id=label_ids,
+                          valid_ids=valid,
+                          label_mask=label_mask))
     return features
 
-
+'''
 def main():
     parser = argparse.ArgumentParser()
 
     # Required parameters
     parser.add_argument("--data_dir",
-                        default="./iwslt_data",
+                        default=None,
                         type=str,
                         required=True,
                         help="The input data dir. Should contain the .tsv files (or other data files) for the task.")
@@ -311,7 +479,7 @@ def main():
                         type=float,
                         help="The initial learning rate for Adam.")
     parser.add_argument("--num_train_epochs",
-                        default=2,
+                        default=3,
                         type=int,
                         help="Total number of training epochs to perform.")
     parser.add_argument("--warmup_proportion",
@@ -350,7 +518,6 @@ def main():
     
     if args.do_train:
         tokenizer = FullTokenizer(os.path.join(args.bert_model, "vocab.txt"), args.do_lower_case)
-    
     if args.multi_gpu:
         if len(args.gpus.split(',')) == 1:
             strategy = tf.distribute.MirroredStrategy()
@@ -360,15 +527,16 @@ def main():
     else:
         gpu = args.gpus.split(',')[0]
         strategy = tf.distribute.OneDeviceStrategy(device=f"/gpu:{gpu}")
-
     train_examples = None
     optimizer = None
     num_train_optimization_steps = 0
     ner = None
     if args.do_train:
         train_examples = processor.get_train_examples(args.data_dir)
+        train_features = convert_examples_to_features(
+            train_examples, label_list, args.max_seq_length, tokenizer)
         num_train_optimization_steps = int(
-            len(train_examples) / args.train_batch_size) * args.num_train_epochs
+            len(train_features) / args.train_batch_size) * args.num_train_epochs
         warmup_steps = int(args.warmup_proportion *
                            num_train_optimization_steps)
         learning_rate_fn = tf.keras.optimizers.schedules.PolynomialDecay(initial_learning_rate=args.learning_rate,
@@ -391,8 +559,8 @@ def main():
 
     label_map = {i: label for i, label in enumerate(label_list, 1)}
     if args.do_train:
-        train_features = convert_examples_to_features(
-            train_examples, label_list, args.max_seq_length, tokenizer)
+        
+        print(len(train_features))
         logger.info("***** Running training *****")
         logger.info("  Num examples = %d", len(train_examples))
         logger.info("  Batch size = %d", args.train_batch_size)
@@ -407,10 +575,10 @@ def main():
         all_valid_ids = tf.data.Dataset.from_tensor_slices(
             np.asarray([f.valid_ids for f in train_features]))
         all_label_mask = tf.data.Dataset.from_tensor_slices(
-            np.asarray([f.label_mask for f in train_features]))
+           np.asarray([f.label_mask for f in train_features]))
 
         all_label_ids = tf.data.Dataset.from_tensor_slices(
-            np.asarray([f.label_id for f in train_features]))
+            np.asarray([f.label_ids for f in train_features]))
 
         # Dataset using tf.data
         train_data = tf.data.Dataset.zip(
